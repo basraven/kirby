@@ -1,5 +1,5 @@
 # Kirby - Smart Tube Fan
-Making a PWM Tube Fan smart with an ESP8266 and a temperature sensor
+Making a PWM Tube Fan smart with an ESP8266 and a Temperature Sensor (DS18B20)
 
 ## Contents
 This project consists of:

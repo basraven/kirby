@@ -1,25 +1,26 @@
 {
-  "name": "kirby",
-  "version": "1.0.0",
-  "description": "kirby frontend",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/basraven/kirby.git"
-  },
-  "keywords": [
-    "arduino",
-    "esp8266",
-    "graph",
-    "frontend"
-  ],
-  "author": "Sebastiaan Raven",
-  "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/basraven/kirby/issues"
-  },
-  "homepage": "https://github.com/basraven/kirby#readme"
+    "name": "kirby",
+    "version": "1.0.0",
+    "private": false,
+    "description": "Kirby",
+    "keywords": [
+        "gatsby"
+    ],
+    "scripts": {
+        "develop": "gatsby develop",
+        "start": "gatsby develop",
+        "build": "gatsby build",
+        "serve": "gatsby serve",
+        "clean": "gatsby clean"
+    },
+    "license": "0BSD",
+    "dependencies": {
+        "gatsby": "^2.26.1",
+        "gatsby-plugin-offline": "^3.6.0",
+        "react": "^16.13.1",
+        "react-dom": "^16.13.1"
+    },
+    "devDependencies": {
+        "regenerator-runtime": "^0.13.7"
+    }
 }
