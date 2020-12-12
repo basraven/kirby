@@ -7,6 +7,7 @@
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
 #include <WIFI_DETAILS.h>
+#include <Scheduler.h>
 
 #if defined USE_LITTLEFS
 #include <LittleFS.h>
@@ -16,6 +17,7 @@ LittleFSConfig fileSystemConfig = LittleFSConfig();
 #else
 #error Please select a filesystem first by uncommenting one of the "#define USE_xxx" lines at the beginning of the sketch.
 #endif
+#include <WIFI_DETAILS.h>
 
 
 #define DBG_OUTPUT_PORT Serial
@@ -204,200 +206,43 @@ bool handleFileRead(String path) {
 }
 
 
-/*
-   As some FS (e.g. LittleFS) delete the parent folder when the last child has been removed,
-   return the path of the closest parent still existing
-*/
-String lastExistingParent(String path) {
-  while (!path.isEmpty() && !fileSystem->exists(path)) {
-    if (path.lastIndexOf('/') > 0) {
-      path = path.substring(0, path.lastIndexOf('/'));
-    } else {
-      path = String();  // No slash => the top folder does not exist
-    }
-  }
-  DBG_OUTPUT_PORT.println(String("Last existing parent: ") + path);
-  return path;
+
+void handleMetrics(){
+
+  String json;
+  json.reserve(128);
+
+  json = "{\"metrics\":\"";
+  server.send(200, "application/json", json);
+
 }
 
-/*
-   Handle the creation/rename of a new file
-   Operation      | req.responseText
-   ---------------+--------------------------------------------------------------
-   Create file    | parent of created file
-   Create folder  | parent of created folder
-   Rename file    | parent of source file
-   Move file      | parent of source file, or remaining ancestor
-   Rename folder  | parent of source folder
-   Move folder    | parent of source folder, or remaining ancestor
-*/
-void handleFileCreate() {
-  if (!fsOK) {
-    return replyServerError(FPSTR(FS_INIT_ERROR));
-  }
+void handlePWM(){
+  // if (String("/pwm").indexOf(server.uri()) > 0) {
+  //   return;
+  // }
+  // String targetPercentage = server.arg(1);
+  // DBG_OUTPUT_PORT.print("New target PWM of" + targetPercentage );
+  String json;
+  json.reserve(128);
 
-  String path = server.arg("path");
-  if (path.isEmpty()) {
-    return replyBadRequest(F("PATH ARG MISSING"));
-  }
+  json = "{\"pwm\":\"";
+  server.send(200, "application/json", json);
 
-#ifdef USE_SPIFFS
-  if (checkForUnsupportedPath(path).length() > 0) {
-    return replyServerError(F("INVALID FILENAME"));
-  }
-#endif
-
-  if (path == "/") {
-    return replyBadRequest("BAD PATH");
-  }
-  if (fileSystem->exists(path)) {
-    return replyBadRequest(F("PATH FILE EXISTS"));
-  }
-
-  String src = server.arg("src");
-  if (src.isEmpty()) {
-    // No source specified: creation
-    DBG_OUTPUT_PORT.println(String("handleFileCreate: ") + path);
-    if (path.endsWith("/")) {
-      // Create a folder
-      path.remove(path.length() - 1);
-      if (!fileSystem->mkdir(path)) {
-        return replyServerError(F("MKDIR FAILED"));
-      }
-    } else {
-      // Create a file
-      File file = fileSystem->open(path, "w");
-      if (file) {
-        file.write((const char *)0);
-        file.close();
-      } else {
-        return replyServerError(F("CREATE FAILED"));
-      }
-    }
-    if (path.lastIndexOf('/') > -1) {
-      path = path.substring(0, path.lastIndexOf('/'));
-    }
-    replyOKWithMsg(path);
-  } else {
-    // Source specified: rename
-    if (src == "/") {
-      return replyBadRequest("BAD SRC");
-    }
-    if (!fileSystem->exists(src)) {
-      return replyBadRequest(F("SRC FILE NOT FOUND"));
-    }
-
-    DBG_OUTPUT_PORT.println(String("handleFileCreate: ") + path + " from " + src);
-
-    if (path.endsWith("/")) {
-      path.remove(path.length() - 1);
-    }
-    if (src.endsWith("/")) {
-      src.remove(src.length() - 1);
-    }
-    if (!fileSystem->rename(src, path)) {
-      return replyServerError(F("RENAME FAILED"));
-    }
-    replyOKWithMsg(lastExistingParent(src));
-  }
 }
 
+void handleAutoPilot(){
+  // if (String("/pwm").indexOf(server.uri()) > 0) {
+  //   return;
+  // }
+  // String targetPercentage = server.arg(1);
+  // DBG_OUTPUT_PORT.print("New target PWM of" + targetPercentage );
+  String json;
+  json.reserve(128);
 
-/*
-   Delete the file or folder designed by the given path.
-   If it's a file, delete it.
-   If it's a folder, delete all nested contents first then the folder itself
+  json = "{\"autopilot\":\"";
+  server.send(200, "application/json", json);
 
-   IMPORTANT NOTE: using recursion is generally not recommended on embedded devices and can lead to crashes (stack overflow errors).
-   This use is just for demonstration purpose, and FSBrowser might crash in case of deeply nested filesystems.
-   Please don't do this on a production system.
-*/
-void deleteRecursive(String path) {
-  File file = fileSystem->open(path, "r");
-  bool isDir = file.isDirectory();
-  file.close();
-
-  // If it's a plain file, delete it
-  if (!isDir) {
-    fileSystem->remove(path);
-    return;
-  }
-
-  // Otherwise delete its contents first
-  Dir dir = fileSystem->openDir(path);
-
-  while (dir.next()) {
-    deleteRecursive(path + '/' + dir.fileName());
-  }
-
-  // Then delete the folder itself
-  fileSystem->rmdir(path);
-}
-
-
-/*
-   Handle a file deletion request
-   Operation      | req.responseText
-   ---------------+--------------------------------------------------------------
-   Delete file    | parent of deleted file, or remaining ancestor
-   Delete folder  | parent of deleted folder, or remaining ancestor
-*/
-void handleFileDelete() {
-  if (!fsOK) {
-    return replyServerError(FPSTR(FS_INIT_ERROR));
-  }
-
-  String path = server.arg(0);
-  if (path.isEmpty() || path == "/") {
-    return replyBadRequest("BAD PATH");
-  }
-
-  DBG_OUTPUT_PORT.println(String("handleFileDelete: ") + path);
-  if (!fileSystem->exists(path)) {
-    return replyNotFound(FPSTR(FILE_NOT_FOUND));
-  }
-  deleteRecursive(path);
-
-  replyOKWithMsg(lastExistingParent(path));
-}
-
-/*
-   Handle a file upload request
-*/
-void handleFileUpload() {
-  if (!fsOK) {
-    return replyServerError(FPSTR(FS_INIT_ERROR));
-  }
-  if (server.uri() != "/edit") {
-    return;
-  }
-  HTTPUpload& upload = server.upload();
-  if (upload.status == UPLOAD_FILE_START) {
-    String filename = upload.filename;
-    // Make sure paths always start with "/"
-    if (!filename.startsWith("/")) {
-      filename = "/" + filename;
-    }
-    DBG_OUTPUT_PORT.println(String("handleFileUpload Name: ") + filename);
-    uploadFile = fileSystem->open(filename, "w");
-    if (!uploadFile) {
-      return replyServerError(F("CREATE FAILED"));
-    }
-    DBG_OUTPUT_PORT.println(String("Upload: START, filename: ") + filename);
-  } else if (upload.status == UPLOAD_FILE_WRITE) {
-    if (uploadFile) {
-      size_t bytesWritten = uploadFile.write(upload.buf, upload.currentSize);
-      if (bytesWritten != upload.currentSize) {
-        return replyServerError(F("WRITE FAILED"));
-      }
-    }
-    DBG_OUTPUT_PORT.println(String("Upload: WRITE, Bytes: ") + upload.currentSize);
-  } else if (upload.status == UPLOAD_FILE_END) {
-    if (uploadFile) {
-      uploadFile.close();
-    }
-    DBG_OUTPUT_PORT.println(String("Upload: END, Size: ") + upload.totalSize);
-  }
 }
 
 
@@ -407,11 +252,26 @@ void handleFileUpload() {
    and if it fails, return a 404 page with debug information
 */
 void handleNotFound() {
+  
+  String uri = ESP8266WebServer::urlDecode(server.uri()); // required to read paths with blanks
+  
+  // Handle wildcard paths
+  
+  if(uri.indexOf("/pwm") == 0){
+    return handlePWM();
+  }
+  if(uri.indexOf("/metrics") == 0){
+    return handlePWM();
+  }  
+  
+  if(uri.indexOf("/auto") == 0){
+    return handleAutoPilot();
+  }  
+  
   if (!fsOK) {
     return replyServerError(FPSTR(FS_INIT_ERROR));
   }
 
-  String uri = ESP8266WebServer::urlDecode(server.uri()); // required to read paths with blanks
 
   if (handleFileRead(uri)) {
     return;
@@ -442,25 +302,78 @@ void handleNotFound() {
   return replyNotFound(message);
 }
 
-/*
-   This specific handler returns the index.htm (or a gzipped version) from the /edit folder.
-   If the file is not present but the flag INCLUDE_FALLBACK_INDEX_HTM has been set, falls back to the version
-   embedded in the program code.
-   Otherwise, fails with a 404 page with debug information
-*/
-void handleGetEdit() {
-  if (handleFileRead(F("/edit/index.htm"))) {
-    return;
-  }
 
-#ifdef INCLUDE_FALLBACK_INDEX_HTM
-  server.sendHeader(F("Content-Encoding"), "gzip");
-  server.send(200, "text/html", index_htm_gz, index_htm_gz_len);
-#else
-  replyNotFound(FPSTR(FILE_NOT_FOUND));
-#endif
 
-}
+////////////////////////////////
+// Sensor Task
+class SensorTask : public Task {
+protected:
+    void setup() {
+
+    }
+
+    void loop() {
+      DBG_OUTPUT_PORT.print("SENSORRR");
+      delay(3000);
+    }
+
+private:
+    uint8_t state;
+} sensor_task;
+
+////////////////////////////////
+// Auto Pilot Task
+class AutopilotTask : public Task {
+protected:
+    void setup() {
+
+    }
+
+    void loop() {
+      DBG_OUTPUT_PORT.print("Autopilot");
+      delay(5000);
+    }
+
+private:
+    uint8_t state;
+} autopilot_task;
+
+
+
+////////////////////////////////
+// WIFI Task
+
+class WifiTask : public Task {
+protected:
+    void setup() {
+      ////////////////////////////////
+      // WEB SERVER INIT
+
+      // Filesystem status
+      server.on("/status", HTTP_GET, handleStatus);
+
+      // List directory
+      server.on("/list", HTTP_GET, handleFileList);
+
+      // Default handler for all URIs not defined above
+      // Use it to read files from filesystem
+      server.onNotFound(handleNotFound);
+
+      // Start server
+      server.begin();
+      DBG_OUTPUT_PORT.println("HTTP server started");
+    }
+
+    void loop() {
+      server.handleClient();
+      MDNS.update();
+    }
+
+private:
+    uint8_t state;
+} wifi_task;
+
+
 
 void setup(void) {
   ////////////////////////////////
@@ -501,40 +414,15 @@ void setup(void) {
     DBG_OUTPUT_PORT.println(F(".local/edit to open the FileSystem Browser"));
   }
 
-  ////////////////////////////////
-  // WEB SERVER INIT
+  Scheduler.start(&wifi_task);
+  Scheduler.start(&sensor_task);
+  Scheduler.start(&autopilot_task);
 
-  // Filesystem status
-  server.on("/status", HTTP_GET, handleStatus);
-
-  // List directory
-  server.on("/list", HTTP_GET, handleFileList);
-
-  // Load editor
-  server.on("/edit", HTTP_GET, handleGetEdit);
-
-  // Create file
-  server.on("/edit",  HTTP_PUT, handleFileCreate);
-
-  // Delete file
-  server.on("/edit",  HTTP_DELETE, handleFileDelete);
-
-  // Upload file
-  // - first callback is called after the request has ended with all parsed arguments
-  // - second callback handles file upload at that location
-  server.on("/edit",  HTTP_POST, replyOK, handleFileUpload);
-
-  // Default handler for all URIs not defined above
-  // Use it to read files from filesystem
-  server.onNotFound(handleNotFound);
-
-  // Start server
-  server.begin();
-  DBG_OUTPUT_PORT.println("HTTP server started");
+  Scheduler.begin();
+ 
 }
 
 
 void loop(void) {
-  server.handleClient();
-  MDNS.update();
+  DBG_OUTPUT_PORT.print("This should never happen");
 }

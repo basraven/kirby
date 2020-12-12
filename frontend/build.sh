@@ -1,2 +1,0 @@
-#!/bin/bash
-docker run -it --rm --name kirby-build -e NPM_CONFIG_PREFIX=/node_modules -v $PWD/:/src -w /src node bash -c 'mkdir -p /node_modules/lib && export PATH=$PATH:/node_modules/bin &&  npm install -g gatsby-cli && gatsby build'
