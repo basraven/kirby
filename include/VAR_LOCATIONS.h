@@ -1,6 +1,6 @@
 #ifndef VAR_LOCACTIONS
 #define VAR_LOCACTIONS
-const char * pwmCurrent = "/var-pwm-current";
-const char * pwmSteps = "/var-pwm-steps";
-const char * autoPilot = "/var-autopilot";
+const char * locPwmCurrent = "/var-pwm-current";
+const char * locAutoPilotSettings = "/var-autopilot-settings";
+const char * locAutoPilotState = "/var-autopilot-state";
 #endif //VAR_LOCACTIONS

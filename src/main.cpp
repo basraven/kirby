@@ -18,9 +18,11 @@ LittleFSConfig fileSystemConfig = LittleFSConfig();
 #error Please select a filesystem first by uncommenting one of the "#define USE_xxx" lines at the beginning of the sketch.
 #endif
 #include <WIFI_DETAILS.h>
+#include <VAR_LOCATIONS.h>
 
 
 #define DBG_OUTPUT_PORT Serial
+const short int BUILTIN_LED1 = 1 ; // GPIO1 blue led and transaction GPIO
 
 #ifndef STASSID
 #define STASSID1 primaryWifiSSID
@@ -46,6 +48,33 @@ static const char TEXT_PLAIN[] PROGMEM = "text/plain";
 static const char FS_INIT_ERROR[] PROGMEM = "FS INIT ERROR";
 static const char FILE_NOT_FOUND[] PROGMEM = "FileNotFound";
 static const char WRONG_METHOD[] PROGMEM = "WrongMethod";
+
+// Temperature
+#include <OneWire.h>
+#include <DallasTemperature.h>
+
+#define ONE_WIRE_BUS 2
+
+OneWire oneWire(ONE_WIRE_BUS);
+
+DallasTemperature sensors(&oneWire);
+
+float Celcius=0;
+float Fahrenheit=0;
+
+
+
+// PWM
+short int currentPwm = 100;
+
+// Metrics
+short int currentTemp = 0;
+
+// Auto pilot
+bool autopilotState = false;
+const short int autopilotSettingsSize = 20;
+short int autopilotSettings[autopilotSettingsSize][2] = {{0,0}}; // 0 degrees celsius = 0 pwm strength
+
 
 ////////////////////////////////
 // Utils to return HTTP codes, and determine content-type
@@ -214,17 +243,30 @@ bool handleFileRead(String path) {
 
 void handleMetrics(){
   DBG_OUTPUT_PORT.print("New /metrics request\n");
-  String json;
-  json.reserve(128);
-
-  json = "{\"metrics\":\"";
-  server.send(200, "application/json", json);
+  String metrics;
+  metrics += "kirby_temperature " + String(currentTemp);
+  metrics += "kirby_pwm_current " + String(currentPwm);
+  metrics += "kirby_pwm_current " + String(currentPwm);
+  metrics += "kirby_autopilot_state " + String(autopilotState);
+  metrics += "kirby_autopilot_setting{strength=\"100\"} " + String(autopilotState);
+  server.send(200, "text/html", metrics);
 
 }
 
 void handlePWM(){
   DBG_OUTPUT_PORT.print("New /pwm request\n ");
-  if (server.method() != HTTP_GET && server.method() != HTTP_POST && server.method() != HTTP_PUT){
+  if (server.method() == HTTP_GET){
+    String json;
+    json.reserve(128);
+
+    // json = "{\"";
+    json = currentPwm;
+    // json += "\"}";
+
+    server.send(200, "application/json", json);
+    return;
+  }
+  if (server.method() != HTTP_PUT){
     return replyServerError(FPSTR(WRONG_METHOD));
   }
 
@@ -232,41 +274,76 @@ void handlePWM(){
   if (path == "/" || path == "/pwm" || path == "/pwm/"){
     return replyBadRequest("BAD PATH");
   }
-  char delimiter[] = "/";
+  DBG_OUTPUT_PORT.print("\ntoken\n");
+
+  // char delimiter[] = "/";
   char charUri[server.uri().length()];
   server.uri().toCharArray(charUri, server.uri().length()+1);
 
   // Returns first token 
   char* token = strtok(charUri, "/"); 
-  token = strtok(NULL, "/"); // Base dir
-  token = strtok(NULL, "/"); // Second dir / PWM Target
+  while (token != NULL) { 
+        printf("%s\n", token); 
+        token = strtok(NULL, "/"); 
+  } 
+  DBG_OUTPUT_PORT.print("DEBUG pathVar/n"); 
+  DBG_OUTPUT_PORT.print(token); 
+  // token = strtok(NULL, "/"); // Base dir
+  // token = strtok(NULL, "/"); // Second dir / PWM Value
+  // DBG_OUTPUT_PORT.print(token); 
+  // DBG_OUTPUT_PORT.print(token);
 
+  // int currentPwm = (int)token;
 
+  // // Persist new value
+  // File file = fileSystem->open(locPwmCurrent, "w");
+  // if (file) {
+  //   file.write(currentPwm);
+  //   file.close();
+  //   DBG_OUTPUT_PORT.print("New current PWM written: " + int(token));
+  //   replyOKWithMsg(String(currentPwm));
+  // } else {
+  //   return replyServerError(F("PERSISTENCE FAILED"));
+  // }
   
-  // DBG_OUTPUT_PORT.print("\ndirString: \n");
-  // DBG_OUTPUT_PORT.print(dirString);
-  // if (path != "/" && !fileSystem->exists(path)) {
-  // }
-
-
-  // DBG_OUTPUT_PORT.print(String(targetArg));
-
-  int pwmTarget = 10;
-  // if (String("/pwm").indexOf(server.uri()) > 0) {
-  //   return;
-  // }
-  // String targetPercentage = server.arg(1);
-  // DBG_OUTPUT_PORT.print("New target PWM of" + targetPercentage );
-  String json;
-  json.reserve(128);
-
-  json = "{\"pwm\":\"";
-  server.send(200, "application/json", json);
-
 }
 
 void handleAutoPilot(){
   DBG_OUTPUT_PORT.print("New /autopilot request\n");
+  if (server.method() == HTTP_GET){
+    String json = "[\n";
+    for(short int i=0; i<autopilotSettingsSize; i++){
+      if(autopilotSettings[i][0] != 0){
+        if(i>1){
+          json += ",\n";
+        }
+        json += "\t{";
+
+        json += "\t\t\"temperature\" : \"";
+        json += autopilotSettings[i][0];
+        json += "\", \n";
+        
+        json += "\t\t\"strength\" : \"";
+        json += autopilotSettings[i][1];
+        json += "\", \n";
+
+        json += "\t}";
+      }
+    }
+    json += "\n]";
+    DBG_OUTPUT_PORT.print(json);
+
+    server.send(200, "application/json", json);
+    return;
+  }
+  if (server.method() == HTTP_PUT){
+    
+  }
+  if (server.method() != HTTP_POST){
+    return replyServerError(FPSTR(WRONG_METHOD));
+  }
+
+  
   // if (String("/pwm").indexOf(server.uri()) > 0) {
   //   return;
   // }
@@ -346,10 +423,16 @@ protected:
     void setup() {
 
     }
-
     void loop() {
       DBG_OUTPUT_PORT.print("SENSORRR\n");
-      delay(15000);
+      sensors.requestTemperatures(); 
+      float temperatureC = sensors.getTempCByIndex(0);
+      float temperatureF = sensors.getTempFByIndex(0);
+      Serial.print(temperatureC);
+      Serial.println("ºC");
+      Serial.print(temperatureF);
+      Serial.println("ºF");
+      delay(30000);
     }
 
 private:
@@ -361,12 +444,24 @@ private:
 class AutopilotTask : public Task {
 protected:
     void setup() {
-
+      // pinMode(BUILTIN_LED1, OUTPUT);
+      
+      // Check if auto pilot settings exist
+      autopilotSettings[1][0] =  30; // 30 degrees
+      autopilotSettings[1][1] =  50; // 50 pwm strength
+      autopilotSettings[2][0] =  40; // 30 degrees
+      autopilotSettings[2][1] =  100; // 50 pwm strength
+      if (fileSystem->exists(locAutoPilotSettings)) {
+        
+      }
     }
 
     void loop() {
-      DBG_OUTPUT_PORT.print("Autopilot\n");
-      delay(20000);
+      // DBG_OUTPUT_PORT.print("Autopilot\n");
+      // digitalWrite(BUILTIN_LED1, LOW);
+      // delay(5000);
+      // digitalWrite(BUILTIN_LED1, HIGH);
+      // delay(5000);
     }
 
 private:
@@ -389,6 +484,15 @@ protected:
 
       // List directory
       server.on("/list", HTTP_GET, handleFileList);
+      
+      // Get PWM strength
+      server.on("/pwm", HTTP_GET, handlePWM);
+      
+      // Get Metrics strength
+      server.on("/metrics", HTTP_GET, handleMetrics);
+      
+      // Get Metrics strength
+      server.on("/autopilot", HTTP_GET, handleAutoPilot);
 
       // Default handler for all URIs not defined above
       // Use it to read files from filesystem
