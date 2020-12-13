@@ -23,12 +23,16 @@ LittleFSConfig fileSystemConfig = LittleFSConfig();
 #define DBG_OUTPUT_PORT Serial
 
 #ifndef STASSID
-#define STASSID primaryWifiSSID
-#define STAPSK  primaryWifiPW
+#define STASSID1 primaryWifiSSID
+#define STAPSK1  primaryWifiPW
+#define STASSID2 secundaryWifiSSID
+#define STAPSK2  secundaryWifiPW
 #endif
 
-const char* ssid = STASSID;
-const char* password = STAPSK;
+const char* ssid1 = STASSID1;
+const char* ssid2 = STASSID2;
+const char* wifipassword1 = STAPSK1;
+const char* wifipassword2 = STAPSK2;
 const char* host = "kirby";
 
 ESP8266WebServer server(80);
@@ -41,6 +45,7 @@ File uploadFile;
 static const char TEXT_PLAIN[] PROGMEM = "text/plain";
 static const char FS_INIT_ERROR[] PROGMEM = "FS INIT ERROR";
 static const char FILE_NOT_FOUND[] PROGMEM = "FileNotFound";
+static const char WRONG_METHOD[] PROGMEM = "WrongMethod";
 
 ////////////////////////////////
 // Utils to return HTTP codes, and determine content-type
@@ -208,7 +213,7 @@ bool handleFileRead(String path) {
 
 
 void handleMetrics(){
-
+  DBG_OUTPUT_PORT.print("New /metrics request\n");
   String json;
   json.reserve(128);
 
@@ -218,6 +223,35 @@ void handleMetrics(){
 }
 
 void handlePWM(){
+  DBG_OUTPUT_PORT.print("New /pwm request\n ");
+  if (server.method() != HTTP_GET && server.method() != HTTP_POST && server.method() != HTTP_PUT){
+    return replyServerError(FPSTR(WRONG_METHOD));
+  }
+
+  String path = server.arg("dir");
+  if (path == "/" || path == "/pwm" || path == "/pwm/"){
+    return replyBadRequest("BAD PATH");
+  }
+  char delimiter[] = "/";
+  char charUri[server.uri().length()];
+  server.uri().toCharArray(charUri, server.uri().length()+1);
+
+  // Returns first token 
+  char* token = strtok(charUri, "/"); 
+  token = strtok(NULL, "/"); // Base dir
+  token = strtok(NULL, "/"); // Second dir / PWM Target
+
+
+  
+  // DBG_OUTPUT_PORT.print("\ndirString: \n");
+  // DBG_OUTPUT_PORT.print(dirString);
+  // if (path != "/" && !fileSystem->exists(path)) {
+  // }
+
+
+  // DBG_OUTPUT_PORT.print(String(targetArg));
+
+  int pwmTarget = 10;
   // if (String("/pwm").indexOf(server.uri()) > 0) {
   //   return;
   // }
@@ -232,6 +266,7 @@ void handlePWM(){
 }
 
 void handleAutoPilot(){
+  DBG_OUTPUT_PORT.print("New /autopilot request\n");
   // if (String("/pwm").indexOf(server.uri()) > 0) {
   //   return;
   // }
@@ -264,7 +299,7 @@ void handleNotFound() {
     return handlePWM();
   }  
   
-  if(uri.indexOf("/auto") == 0){
+  if(uri.indexOf("/autopilot") == 0){
     return handleAutoPilot();
   }  
   
@@ -313,8 +348,8 @@ protected:
     }
 
     void loop() {
-      DBG_OUTPUT_PORT.print("SENSORRR");
-      delay(3000);
+      DBG_OUTPUT_PORT.print("SENSORRR\n");
+      delay(15000);
     }
 
 private:
@@ -330,8 +365,8 @@ protected:
     }
 
     void loop() {
-      DBG_OUTPUT_PORT.print("Autopilot");
-      delay(5000);
+      DBG_OUTPUT_PORT.print("Autopilot\n");
+      delay(20000);
     }
 
 private:
@@ -392,15 +427,28 @@ void setup(void) {
 
   ////////////////////////////////
   // WI-FI INIT
-  DBG_OUTPUT_PORT.printf("Connecting to %s\n", ssid);
   WiFi.mode(WIFI_STA);
   WiFi.hostname(host);
-  WiFi.begin(ssid, password);
-  // Wait for connection
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    DBG_OUTPUT_PORT.print(".");
-  }
+  
+  const char* *ssid = &ssid1;
+  const char* *wifipassword = &wifipassword1;
+  
+  do{
+    DBG_OUTPUT_PORT.printf("Connecting to %s\n", *ssid);
+    WiFi.begin(*ssid, *wifipassword);
+    for(uint8_t i=0; i<10; i++){
+      delay(1000);
+      DBG_OUTPUT_PORT.print(".");
+      // Wait for connection
+    }
+    if(ssid == &ssid1){
+      ssid = &ssid2;
+      wifipassword = &wifipassword2;
+    }else{
+      ssid = &ssid1;
+      wifipassword = &wifipassword1;
+    }
+  } while (WiFi.status() != WL_CONNECTED);
   DBG_OUTPUT_PORT.println("");
   DBG_OUTPUT_PORT.print(F("Connected! IP address: "));
   DBG_OUTPUT_PORT.println(WiFi.localIP());

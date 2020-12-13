@@ -1,0 +1,154 @@
+openapi: 3.0.1
+info:
+  title: Kirby
+  description: 'Kirby API Spec'
+  termsOfService: http://swagger.io/terms/
+  contact:
+    email: info@la1r.com
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  version: 0.1.0
+externalDocs:
+  description: Find out more about Kirby
+  url: http://github.com/basraven/kirby
+servers:
+- url: http://la1r.com/kirby/v1
+tags:
+- name: pwm
+  description: Access pwm settings
+- name: metrics
+  description: Access metrics
+- name: autopilot
+  description: Manage auto pilot behavior
+
+paths:
+  /pwm:
+    get:
+      tags:
+      - pwm
+      summary: Get current pwm strength
+      description: Multiple status values can be provided with comma separated strings
+      operationId: getCurrentPwm
+      responses:
+        200:
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PWMStrength'
+  /pwm/{strength}:
+    put:
+      tags:
+      - pwm
+      summary: Update current pwm strength
+      operationId: updatePutPwm
+      parameters:
+      - name: strength
+        in: path
+        description: Targeted Strength for PWM
+        required: true
+        schema:
+          $ref: '#/components/schemas/PWMStrength'
+      responses:
+        400:
+          description: Invalid strength supplied
+          content: {}
+  /metrics:
+    get:
+      tags:
+      - metrics
+      summary: Get current metrics
+      description: Gets current metrics values
+      operationId: getCurrentMetrics
+      responses:
+        200:  
+          description: success and returns prometheus formatted metrics
+          content:
+            text/html:
+              schema:
+                $ref: '#/components/schemas/Metric'
+                
+  /autopilot:
+    get:
+      tags:
+      - autopilot
+      summary: Get current auto pilot settings
+      description: Gets current auto pilot settings
+      operationId: getCurrentAutopilot
+      responses:
+        200:  
+          description: success and returns auto pilot settings array
+          content:
+            application/json:
+              schema:
+                type: array
+                items: 
+                  $ref: '#/components/schemas/AutopilotSetting'
+                  
+    post:
+      tags:
+      - autopilot
+      summary: Create auto pilot setting, overwrites old settings
+      description: This will always overwrite all current settings
+      operationId: createAutopilotSettings
+      requestBody:
+        description: Created auto pilot settings object
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/AutopilotSetting'
+        required: true
+      responses:
+        default:
+          description: successful operation
+          content: {}
+      x-codegen-request-body-name: body
+  /autopilot/{state}:
+    put:
+      tags:
+      - autopilot
+      summary: Update current auto pilot state
+      operationId: updatePUTAutopilot state
+      parameters:
+      - name: state
+        in: path
+        description: Targeted State for auto pilot
+        required: true
+        schema:
+          $ref: '#/components/schemas/AutopilotState'
+      responses:
+        400:
+          description: Invalid auto pilot state
+          content: {}
+
+components:
+  schemas:
+    PWMStrength: 
+      type: integer
+      minimum: 0
+      maximum: 100
+      example: 50
+    Metric:
+      type: string
+      example: |-
+        http_requests_total{method="post",code="200"} 1027 1395066363000
+        http_requests_total{method="post",code="400"}    3 1395066363000
+    AutopilotSetting:
+      type: object
+      properties:
+        temperature:
+          type: integer
+          example:  36
+          minimum: 0
+          maximum: 100
+        strength:
+          $ref: '#/components/schemas/PWMStrength'
+    AutopilotState:
+      type: string
+      example: "Enabled"
+      enum:
+        - "Enabled"
+        - "Disabled"
