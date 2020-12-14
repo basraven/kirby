@@ -284,7 +284,7 @@ void handlePWM(){
   char* token = strtok(charUri, "/"); 
   short int i = 0;
 
-  // FIXME: Remove while loop
+  // FIXME: Remove while loop, for now: if it sits it fits
   while (token != NULL) { 
         if(i==1){
           currentPwm = String(token).toInt();
@@ -294,8 +294,6 @@ void handlePWM(){
         token = strtok(NULL, "/");
         i++;
   } 
-
-  
 
   // // Persist new value
   File file = fileSystem->open(locPwmCurrent, "w");
@@ -516,7 +514,33 @@ private:
 
 
 
+void read_persistent_vars(int *varLocation){
+
+}
+  
+// void readFile(const char * path) {
+//   // read pwmCurrent
+//   for()
+//   DBG_OUTPUT_PORT.println("Reading file: %s\n", locPwmCurrent);
+//     File file = LittleFS.open(path, "r");
+//     if (!file) {
+//       Serial.println("Failed to open file for reading");
+//       return;
+//     }
+
+//     Serial.print("Read from file: ");
+//     while (file.available()) {
+//       Serial.write(file.read());
+//     }
+//     file.close();
+//   }
+// }
+
 void setup(void) {
+  int bla = 5;
+  read_persistent_vars(&bla);
+
+
   ////////////////////////////////
   // SERIAL INIT
   DBG_OUTPUT_PORT.begin(115200);
