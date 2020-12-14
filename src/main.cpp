@@ -282,29 +282,31 @@ void handlePWM(){
 
   // Returns first token 
   char* token = strtok(charUri, "/"); 
-  while (token != NULL) { 
-        printf("%s\n", token); 
-        token = strtok(NULL, "/"); 
-  } 
-  DBG_OUTPUT_PORT.print("DEBUG pathVar/n"); 
-  DBG_OUTPUT_PORT.print(token); 
-  // token = strtok(NULL, "/"); // Base dir
-  // token = strtok(NULL, "/"); // Second dir / PWM Value
-  // DBG_OUTPUT_PORT.print(token); 
-  // DBG_OUTPUT_PORT.print(token);
+  short int i = 0;
 
-  // int currentPwm = (int)token;
+  // FIXME: Remove while loop
+  while (token != NULL) { 
+        if(i==1){
+          currentPwm = String(token).toInt();
+          // newPwmVal = token;
+        }
+        printf("%s\n", token); 
+        token = strtok(NULL, "/");
+        i++;
+  } 
+
+  
 
   // // Persist new value
-  // File file = fileSystem->open(locPwmCurrent, "w");
-  // if (file) {
-  //   file.write(currentPwm);
-  //   file.close();
-  //   DBG_OUTPUT_PORT.print("New current PWM written: " + int(token));
-  //   replyOKWithMsg(String(currentPwm));
-  // } else {
-  //   return replyServerError(F("PERSISTENCE FAILED"));
-  // }
+  File file = fileSystem->open(locPwmCurrent, "w");
+  if (file) {
+    file.write(currentPwm);
+    file.close();
+    DBG_OUTPUT_PORT.print("New current PWM written: " + currentPwm);
+    replyOKWithMsg(String(currentPwm));
+  } else {
+    return replyServerError(F("PERSISTENCE FAILED"));
+  }
   
 }
 
