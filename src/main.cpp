@@ -65,10 +65,10 @@ float Fahrenheit=0;
 
 
 // PWM
-short int currentPwm = 100;
+short int currentPwm;
 
 // Metrics
-short int currentTemp = 0;
+short int currentTemp;
 
 // Auto pilot
 bool autopilotState = false;
@@ -514,31 +514,24 @@ private:
 
 
 
-void read_persistent_vars(int *varLocation){
+void read_persistent_vars(const char * *varLocation, short int *varName){
+  DBG_OUTPUT_PORT.print(*varLocation);
+  DBG_OUTPUT_PORT.print(*varName);
+  File file = LittleFS.open(*varLocation, "r");
+  if (!file) {
+    Serial.println("Failed to open file for reading");
+    return;
+  }
 
+  Serial.print("Read from file: ");
+  while (file.available()) {
+    Serial.write(file.read());
+  }
+  file.close();
 }
   
-// void readFile(const char * path) {
-//   // read pwmCurrent
-//   for()
-//   DBG_OUTPUT_PORT.println("Reading file: %s\n", locPwmCurrent);
-//     File file = LittleFS.open(path, "r");
-//     if (!file) {
-//       Serial.println("Failed to open file for reading");
-//       return;
-//     }
-
-//     Serial.print("Read from file: ");
-//     while (file.available()) {
-//       Serial.write(file.read());
-//     }
-//     file.close();
-//   }
-// }
 
 void setup(void) {
-  int bla = 5;
-  read_persistent_vars(&bla);
 
 
   ////////////////////////////////
@@ -562,7 +555,7 @@ void setup(void) {
   
   const char* *ssid = &ssid1;
   const char* *wifipassword = &wifipassword1;
-  
+
   do{
     DBG_OUTPUT_PORT.printf("Connecting to %s\n", *ssid);
     WiFi.begin(*ssid, *wifipassword);
@@ -582,6 +575,11 @@ void setup(void) {
   DBG_OUTPUT_PORT.println("");
   DBG_OUTPUT_PORT.print(F("Connected! IP address: "));
   DBG_OUTPUT_PORT.println(WiFi.localIP());
+    delay(4000);
+  DBG_OUTPUT_PORT.print(">>>>>>>>>>>>>>>>>>>>>>>>>>>> LOADING");
+  read_persistent_vars(&locPwmCurrent, &currentPwm);
+
+  
 
   ////////////////////////////////
   // MDNS INIT
