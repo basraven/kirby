@@ -8,6 +8,9 @@
 #include <ESP8266mDNS.h>
 #include <WIFI_DETAILS.h>
 #include <Scheduler.h>
+#include <ArduinoJson.h>
+
+StaticJsonDocument<200> doc;
 
 #if defined USE_LITTLEFS
 #include <LittleFS.h>
@@ -52,28 +55,24 @@ static const char WRONG_METHOD[] PROGMEM = "WrongMethod";
 // Temperature
 #include <OneWire.h>
 #include <DallasTemperature.h>
-
 #define ONE_WIRE_BUS 2
-
 OneWire oneWire(ONE_WIRE_BUS);
-
 DallasTemperature sensors(&oneWire);
-
-float Celcius=0;
-float Fahrenheit=0;
-
-
+float tempCelcius=0;
+// float Fahrenheit=0;
+short const int probeSleepMs = 30000;
 
 // PWM
+short const int PWMGPIO = 0;
 short int currentPwm;
-
-// Metrics
-short int currentTemp;
+short int prevPwm;
+short int pwmTaskDelayMs = 1000;
 
 // Auto pilot
 bool autopilotState = false;
+short const int autopilotDelay = 2000;
 const short int autopilotSettingsSize = 20;
-short int autopilotSettings[autopilotSettingsSize][2] = {{0,0}}; // 0 degrees celsius = 0 pwm strength
+short int autopilotSettings[autopilotSettingsSize][2];// ;//= {{0,0}}; // 0 degrees celsius = 0 pwm strength
 
 
 ////////////////////////////////
@@ -101,7 +100,6 @@ void replyServerError(String msg) {
   server.send(500, FPSTR(TEXT_PLAIN), msg + "\r\n");
 }
 
-
 ////////////////////////////////
 // Request handlers
 
@@ -109,7 +107,7 @@ void replyServerError(String msg) {
    Return the FS type, status and size info
 */
 void handleStatus() {
-  DBG_OUTPUT_PORT.println("handleStatus");
+  DBG_OUTPUT_PORT.println("New /status request");
   FSInfo fs_info;
   String json;
   json.reserve(128);
@@ -242,28 +240,26 @@ bool handleFileRead(String path) {
 
 
 void handleMetrics(){
-  DBG_OUTPUT_PORT.print("New /metrics request\n");
+  DBG_OUTPUT_PORT.println("New /metrics request");
   String metrics;
-  metrics += "kirby_temperature " + String(currentTemp);
-  metrics += "kirby_pwm_current " + String(currentPwm);
-  metrics += "kirby_pwm_current " + String(currentPwm);
-  metrics += "kirby_autopilot_state " + String(autopilotState);
-  metrics += "kirby_autopilot_setting{strength=\"100\"} " + String(autopilotState);
+  metrics += "kirby_temperature_current " + String(tempCelcius) + "\n";
+  metrics += "kirby_pwm_prev " + String(prevPwm) + "\n";
+  metrics += "kirby_pwm_current " + String(currentPwm) + "\n";
+  metrics += "kirby_autopilot_state " + String(autopilotState) + "\n";
+  for(byte i=0; i< autopilotSettingsSize ; i++){
+    if(autopilotSettings[i][1]){
+      metrics += "kirby_autopilot_setting{temperature=\"" + String(autopilotSettings[i][0]) + "\"} " + String(autopilotSettings[i][1]) + "\n";
+    }
+  }
+  // metrics += "kirby_autopilot_setting{strength=\"100\"} " + String(autopilotState);
   server.send(200, "text/html", metrics);
 
 }
 
 void handlePWM(){
-  DBG_OUTPUT_PORT.print("New /pwm request\n ");
+  DBG_OUTPUT_PORT.println("New /pwm request\n ");
   if (server.method() == HTTP_GET){
-    String json;
-    json.reserve(128);
-
-    // json = "{\"";
-    json = currentPwm;
-    // json += "\"}";
-
-    server.send(200, "application/json", json);
+    server.send(200, "application/json", String(currentPwm));
     return;
   }
   if (server.method() != HTTP_PUT){
@@ -274,15 +270,13 @@ void handlePWM(){
   if (path == "/" || path == "/pwm" || path == "/pwm/"){
     return replyBadRequest("BAD PATH");
   }
-  DBG_OUTPUT_PORT.print("\ntoken\n");
-
   // char delimiter[] = "/";
   char charUri[server.uri().length()];
   server.uri().toCharArray(charUri, server.uri().length()+1);
 
   // Returns first token 
   char* token = strtok(charUri, "/"); 
-  short int i = 0;
+  byte i = 0;
 
   // FIXME: Remove while loop, for now: if it sits it fits
   while (token != NULL) { 
@@ -300,8 +294,8 @@ void handlePWM(){
   if (file) {
     file.write(currentPwm);
     file.close();
-    DBG_OUTPUT_PORT.print("New current PWM written: " + currentPwm);
-    replyOKWithMsg(String(currentPwm));
+    DBG_OUTPUT_PORT.println("New current PWM written: " + currentPwm);
+    return replyOKWithMsg(String(currentPwm));
   } else {
     return replyServerError(F("PERSISTENCE FAILED"));
   }
@@ -309,12 +303,12 @@ void handlePWM(){
 }
 
 void handleAutoPilot(){
-  DBG_OUTPUT_PORT.print("New /autopilot request\n");
+  DBG_OUTPUT_PORT.println("New /autopilot request");
   if (server.method() == HTTP_GET){
     String json = "[\n";
-    for(short int i=0; i<autopilotSettingsSize; i++){
+    for(byte i=0; i<autopilotSettingsSize; i++){
       if(autopilotSettings[i][0] != 0){
-        if(i>1){
+        if(i>0){
           json += ",\n";
         }
         json += "\t{";
@@ -331,30 +325,58 @@ void handleAutoPilot(){
       }
     }
     json += "\n]";
-    DBG_OUTPUT_PORT.print(json);
-
     server.send(200, "application/json", json);
     return;
   }
+  // TODO: use state toggle
   if (server.method() == HTTP_PUT){
     
   }
-  if (server.method() != HTTP_POST){
-    return replyServerError(FPSTR(WRONG_METHOD));
+  if (server.method() == HTTP_POST){
+    DBG_OUTPUT_PORT.println("Uploading new autopilot settings");
+    
+    // Deserialize the JSON document
+    DeserializationError error = deserializeJson(doc, server.arg(0));
+
+    // Test if parsing succeeds.
+    if (error) {
+      DBG_OUTPUT_PORT.print(F("deserializeJson() failed: "));
+      DBG_OUTPUT_PORT.println(error.f_str());
+      return replyServerError(error.f_str());
+    }
+
+    // Persist new value
+    File file = fileSystem->open(locAutoPilotSettings, "r");
+    fileSystem->remove(locAutoPilotSettings);
+    file.close();
+
+    file = fileSystem->open(locAutoPilotSettings, "w");
+    if (file) {
+      file.write("temperature,strength\n"); // csv headers
+      for(byte i=0; i<doc.size(); i++){
+        autopilotSettings[i][0] = doc[i]["temperature"];
+        autopilotSettings[i][1] = doc[i]["strength"];
+        
+        // TODO: Make more efficient
+        String csvString;
+        csvString += autopilotSettings[i][0]; 
+        csvString += ","; 
+        csvString += autopilotSettings[i][1];  
+        csvString += " "; 
+        char charBuf[csvString.length() + 1];
+        csvString.toCharArray(charBuf, csvString.length());
+        // DBG_OUTPUT_PORT.println("charBuf");
+        // DBG_OUTPUT_PORT.println(charBuf);
+        file.write(charBuf);
+        file.write("\n");
+      }
+      file.close();
+      return replyOKWithMsg(String("New autopilot settings configured"));
+    } else {
+      return replyServerError(F("PERSISTENCE FAILED"));
+    }
   }
-
-  
-  // if (String("/pwm").indexOf(server.uri()) > 0) {
-  //   return;
-  // }
-  // String targetPercentage = server.arg(1);
-  // DBG_OUTPUT_PORT.print("New target PWM of" + targetPercentage );
-  String json;
-  json.reserve(128);
-
-  json = "{\"autopilot\":\"";
-  server.send(200, "application/json", json);
-
+  return replyServerError(FPSTR(WRONG_METHOD));
 }
 
 
@@ -409,30 +431,114 @@ void handleNotFound() {
   message += "path=";
   message += server.arg("path");
   message += '\n';
-  DBG_OUTPUT_PORT.print(message);
 
   return replyNotFound(message);
 }
 
 
+////////////////////////////////
+// Persistence tasks
+void read_persistent_vars(const char * *varLocation, short int *varName){
+  File file = LittleFS.open(*varLocation, "r");
+  if (!file) {
+    DBG_OUTPUT_PORT.println("Failed to open file for reading");
+    return;
+  }
+  while (file.available()) {
+    *varName = file.read();
+  }
+  file.close();
+}
+void read_persistent_autopilot_state(const char * *varLocation, bool *varName){
+  File file = LittleFS.open(*varLocation, "r");
+  if (!file) {
+    DBG_OUTPUT_PORT.println("Failed to open file for reading");
+    return;
+  }
+  while (file.available()) {
+    *varName = bool(file.read());
+  }
+  file.close();
+}
+void read_persistent_autopilot_settings(const char * *varLocation, short int varName[autopilotSettingsSize][2]){
+  File file = LittleFS.open(*varLocation, "r");
+  if (!file) {
+    DBG_OUTPUT_PORT.println("Failed to open file for reading");
+    return;
+  }
+  
+  // TODO: Could be nicer
+  byte i = 0;
+  char charBuf[15];
+  String itemString;
+  String readString;
+  char * pch;
+  while (file.available()) {
+    readString = file.readStringUntil('\n');
+    // DBG_OUTPUT_PORT.println("readString");
+    // DBG_OUTPUT_PORT.println(readString);
+    if(i != 0){
+      readString.toCharArray(charBuf,15);
+      
+      pch = strtok(charBuf,",");
+      itemString = String(pch);
+      // DBG_OUTPUT_PORT.println("itemString1");
+      // DBG_OUTPUT_PORT.println(itemString);
+      autopilotSettings[i-1][0] = itemString.toInt();
+      
+      pch = strtok (NULL, ",");
+      itemString = String(pch);
+      // DBG_OUTPUT_PORT.println("itemString2");
+      // DBG_OUTPUT_PORT.println(itemString);
+      autopilotSettings[i-1][1] = itemString.toInt();
+    }
+    i++;
+  }
+  file.close();
+}
+  
+
+////////////////////////////////
+// PWM Signal Task
+class PwmSignalTask : public Task {
+protected:
+    void setup() {
+      pinMode(PWMGPIO, OUTPUT);
+      DBG_OUTPUT_PORT.println("PWM Signal Task with delay of " + String(pwmTaskDelayMs) + " ms");
+    }
+    void loop() {
+      if(prevPwm != currentPwm){
+        DBG_OUTPUT_PORT.println("Updated PWM Signal, from " + String(prevPwm) + " to " + String(currentPwm));
+        prevPwm = currentPwm;
+      }
+      if(currentPwm < 1){
+        digitalWrite(PWMGPIO, LOW);
+      } else if(currentPwm > 90){ 
+        digitalWrite(PWMGPIO, HIGH);
+      } else {
+        analogWrite(PWMGPIO, round(float(currentPwm) * float(2.55)));
+      }
+      delay(probeSleepMs);
+    }
+
+private:
+    uint8_t state;
+} pwmsignal_task;
 
 ////////////////////////////////
 // Sensor Task
 class SensorTask : public Task {
 protected:
     void setup() {
-
+      DBG_OUTPUT_PORT.println("Temperature probe started with delay of " + String(probeSleepMs) + " ms");
     }
     void loop() {
-      DBG_OUTPUT_PORT.print("SENSORRR\n");
       sensors.requestTemperatures(); 
-      float temperatureC = sensors.getTempCByIndex(0);
-      float temperatureF = sensors.getTempFByIndex(0);
-      Serial.print(temperatureC);
-      Serial.println("ºC");
-      Serial.print(temperatureF);
-      Serial.println("ºF");
-      delay(30000);
+      float newTemp = sensors.getTempCByIndex(0);
+      if(newTemp > 0 && newTemp < 100){
+        tempCelcius = newTemp;
+      }
+      delay(probeSleepMs);
     }
 
 private:
@@ -445,23 +551,23 @@ class AutopilotTask : public Task {
 protected:
     void setup() {
       // pinMode(BUILTIN_LED1, OUTPUT);
-      
-      // Check if auto pilot settings exist
-      autopilotSettings[1][0] =  30; // 30 degrees
-      autopilotSettings[1][1] =  50; // 50 pwm strength
-      autopilotSettings[2][0] =  40; // 30 degrees
-      autopilotSettings[2][1] =  100; // 50 pwm strength
+
       if (fileSystem->exists(locAutoPilotSettings)) {
-        
+        read_persistent_autopilot_settings(&locAutoPilotSettings, autopilotSettings);
+      }
+      if (fileSystem->exists(locAutoPilotState)) {
+        read_persistent_autopilot_state(&locAutoPilotState, &autopilotState);
       }
     }
 
     void loop() {
-      // DBG_OUTPUT_PORT.print("Autopilot\n");
-      // digitalWrite(BUILTIN_LED1, LOW);
-      // delay(5000);
-      // digitalWrite(BUILTIN_LED1, HIGH);
-      // delay(5000);
+      for(byte i; i<autopilotSettingsSize; i++){
+        if(autopilotSettings[i][1] > round(tempCelcius)){ // First temperature in the array higher than current temp
+          currentPwm = autopilotSettings[i][1];
+          break;
+        }
+      }
+      delay(autopilotDelay);
     }
 
 private:
@@ -476,6 +582,8 @@ private:
 class WifiTask : public Task {
 protected:
     void setup() {
+
+      
       ////////////////////////////////
       // WEB SERVER INIT
 
@@ -514,31 +622,11 @@ private:
 
 
 
-void read_persistent_vars(const char * *varLocation, short int *varName){
-  DBG_OUTPUT_PORT.print(*varLocation);
-  DBG_OUTPUT_PORT.print(*varName);
-  File file = LittleFS.open(*varLocation, "r");
-  if (!file) {
-    Serial.println("Failed to open file for reading");
-    return;
-  }
-
-  Serial.print("Read from file: ");
-  while (file.available()) {
-    Serial.write(file.read());
-  }
-  file.close();
-}
-  
-
 void setup(void) {
-
-
   ////////////////////////////////
   // SERIAL INIT
   DBG_OUTPUT_PORT.begin(115200);
   DBG_OUTPUT_PORT.setDebugOutput(true);
-  DBG_OUTPUT_PORT.print('\n');
 
   ////////////////////////////////
   // FILESYSTEM INIT
@@ -562,6 +650,9 @@ void setup(void) {
     for(uint8_t i=0; i<10; i++){
       delay(1000);
       DBG_OUTPUT_PORT.print(".");
+      if(WiFi.status() == WL_CONNECTED){
+        break;
+      }
       // Wait for connection
     }
     if(ssid == &ssid1){
@@ -572,27 +663,25 @@ void setup(void) {
       wifipassword = &wifipassword1;
     }
   } while (WiFi.status() != WL_CONNECTED);
-  DBG_OUTPUT_PORT.println("");
-  DBG_OUTPUT_PORT.print(F("Connected! IP address: "));
-  DBG_OUTPUT_PORT.println(WiFi.localIP());
-    delay(4000);
-  DBG_OUTPUT_PORT.print(">>>>>>>>>>>>>>>>>>>>>>>>>>>> LOADING");
-  read_persistent_vars(&locPwmCurrent, &currentPwm);
-
-  
+  DBG_OUTPUT_PORT.println(F("Connected! IP address: "));
+  DBG_OUTPUT_PORT.println(WiFi.localIP());  
 
   ////////////////////////////////
   // MDNS INIT
   if (MDNS.begin(host)) {
     MDNS.addService("http", "tcp", 80);
-    DBG_OUTPUT_PORT.print(F("Open http://"));
-    DBG_OUTPUT_PORT.print(host);
-    DBG_OUTPUT_PORT.println(F(".local/edit to open the FileSystem Browser"));
+    DBG_OUTPUT_PORT.println(F("Open http://"));
+    DBG_OUTPUT_PORT.println(host);
+  }
+
+  if (fileSystem->exists(locPwmCurrent)) {
+    read_persistent_vars(&locPwmCurrent, &currentPwm);
   }
 
   Scheduler.start(&wifi_task);
   Scheduler.start(&sensor_task);
   Scheduler.start(&autopilot_task);
+  Scheduler.start(&pwmsignal_task);
 
   Scheduler.begin();
  
@@ -600,5 +689,5 @@ void setup(void) {
 
 
 void loop(void) {
-  DBG_OUTPUT_PORT.print("This should never happen");
+  DBG_OUTPUT_PORT.println("This should never happen");
 }
