@@ -52,21 +52,24 @@ static const char FS_INIT_ERROR[] PROGMEM = "FS INIT ERROR";
 static const char FILE_NOT_FOUND[] PROGMEM = "FileNotFound";
 static const char WRONG_METHOD[] PROGMEM = "WrongMethod";
 
+// WIFI
+short const int wifiSleepMS = 2000;
+
 // Temperature
 #include <OneWire.h>
 #include <DallasTemperature.h>
-#define ONE_WIRE_BUS 2
+#define ONE_WIRE_BUS 0
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
 float tempCelcius=0;
 // float Fahrenheit=0;
-short const int probeSleepMs = 30000;
+short const int probeSleepMs = 3000;
 
 // PWM
-short const int PWMGPIO = 0;
+short const int PWMGPIO = 2;
 short int currentPwm;
 short int prevPwm;
-short int pwmTaskDelayMs = 1000;
+short int pwmTaskDelayMs = 1;
 
 // Auto pilot
 bool autopilotState = false;
@@ -258,15 +261,16 @@ void handleMetrics(){
 
 void handlePWM(){
   DBG_OUTPUT_PORT.println("New /pwm request\n ");
-  if (server.method() == HTTP_GET){
+  String path = server.arg("dir");
+  DBG_OUTPUT_PORT.println(path);
+  if (server.method() == HTTP_GET && path == "/pwm"){
     server.send(200, "application/json", String(currentPwm));
     return;
   }
-  if (server.method() != HTTP_PUT){
+  if (server.method() != HTTP_PUT && server.method() != HTTP_GET){
     return replyServerError(FPSTR(WRONG_METHOD));
   }
 
-  String path = server.arg("dir");
   if (path == "/" || path == "/pwm" || path == "/pwm/"){
     return replyBadRequest("BAD PATH");
   }
@@ -511,14 +515,19 @@ protected:
         DBG_OUTPUT_PORT.println("Updated PWM Signal, from " + String(prevPwm) + " to " + String(currentPwm));
         prevPwm = currentPwm;
       }
+      // DBG_OUTPUT_PORT.println("TMP");
       if(currentPwm < 1){
         digitalWrite(PWMGPIO, LOW);
+        // DBG_OUTPUT_PORT.println("LOW");
       } else if(currentPwm > 90){ 
         digitalWrite(PWMGPIO, HIGH);
+        // DBG_OUTPUT_PORT.println("HIGH");
       } else {
         analogWrite(PWMGPIO, round(float(currentPwm) * float(2.55)));
+        // analogWrite(PWMGPIO, 255);
+        // DBG_OUTPUT_PORT.println(float(currentPwm) * float(2.55));
       }
-      delay(probeSleepMs);
+      // delay(pwmTaskDelayMs);
     }
 
 private:
@@ -535,6 +544,11 @@ protected:
     void loop() {
       sensors.requestTemperatures(); 
       float newTemp = sensors.getTempCByIndex(0);
+      // DBG_OUTPUT_PORT.println("newTemp");
+      // DBG_OUTPUT_PORT.println(sensors.getTempCByIndex(0));
+      // DBG_OUTPUT_PORT.println(sensors.getTempCByIndex(1));
+      // DBG_OUTPUT_PORT.println(sensors.getTempCByIndex(2));
+
       if(newTemp > 0 && newTemp < 100){
         tempCelcius = newTemp;
       }
@@ -614,6 +628,7 @@ protected:
     void loop() {
       server.handleClient();
       MDNS.update();
+      delay(wifiSleepMS);
     }
 
 private:
@@ -623,6 +638,7 @@ private:
 
 
 void setup(void) {
+  pinMode(PWMGPIO, OUTPUT);
   ////////////////////////////////
   // SERIAL INIT
   DBG_OUTPUT_PORT.begin(115200);
@@ -636,6 +652,7 @@ void setup(void) {
   fsOK = fileSystem->begin();
   DBG_OUTPUT_PORT.println(fsOK ? F("Filesystem initialized.") : F("Filesystem init failed!"));
 
+  Scheduler.start(&pwmsignal_task);
   ////////////////////////////////
   // WI-FI INIT
   WiFi.mode(WIFI_STA);
@@ -679,9 +696,8 @@ void setup(void) {
   }
 
   Scheduler.start(&wifi_task);
-  Scheduler.start(&sensor_task);
-  Scheduler.start(&autopilot_task);
-  Scheduler.start(&pwmsignal_task);
+  // Scheduler.start(&sensor_task);
+  // Scheduler.start(&autopilot_task);
 
   Scheduler.begin();
  
