@@ -636,9 +636,16 @@ private:
 } wifi_task;
 
 
-
+boolean configMode = false;
 void setup(void) {
   pinMode(PWMGPIO, OUTPUT);
+  digitalWrite(PWMGPIO, HIGH); 
+  configMode = (digitalRead(2) == LOW);
+  if(configMode){
+
+  } else{
+    digitalWrite(0, HIGH);
+  }
   ////////////////////////////////
   // SERIAL INIT
   DBG_OUTPUT_PORT.begin(115200);
@@ -696,8 +703,8 @@ void setup(void) {
   }
 
   Scheduler.start(&wifi_task);
-  // Scheduler.start(&sensor_task);
-  // Scheduler.start(&autopilot_task);
+  Scheduler.start(&sensor_task);
+  Scheduler.start(&autopilot_task);
 
   Scheduler.begin();
  
